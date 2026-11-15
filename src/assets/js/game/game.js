@@ -1,216 +1,177 @@
-import Alpine from '@alpinejs/csp';
+import { computed, effect, reactive } from 'rousejs';
 import { Tile } from './Tile';
 import { allWords, theWords } from './words';
 
-export function game(num) {
-  let numGuesses = 3;
+const MIN_GUESSES = 3;
+const MAX_GUESSES = 10;
+const STORAGE_KEY = 'wordle-game-state';
+const STATUS_RANK = { absent: 1, present: 2, correct: 3 };
+const validWords = new Set(allWords);
+const letters = [
+  'QWERTYUIOP'.split(''),
+  'ASDFGHJKL'.split(''),
+  ['Enter', ...'ZXCVBNM'.split(''), 'Backspace'],
+];
 
-  if (num !== undefined) {
-    if (typeof num === 'number' && num >= 3 && num <= 10) {
-      numGuesses = num;
+function parseNumGuesses(raw) {
+  if (raw !== undefined) {
+    const num = Number(raw);
+    if (Number.isInteger(num) && num >= MIN_GUESSES && num <= MAX_GUESSES) {
+      return num;
+    }
+    console.warn(`Invalid data-guesses value: ${raw}. Must be an integer from ${MIN_GUESSES} to ${MAX_GUESSES}.`);
+  }
+  return MIN_GUESSES;
+}
+
+function loadSaved() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+  } catch {
+    return null;
+  }
+}
+
+export const game = ({ host }) => {
+  const board = reactive([]);
+  const saved = loadSaved();
+  const gameState = reactive({
+    currentRowIndex: 0,
+    errors: false,
+    gameId: 0,
+    guesses: [],
+    message: '',
+    numGuesses: parseNumGuesses(host.dataset.guesses),
+    status: 'NONE', // NONE, IN_PROGRESS, WIN, LOSE
+    ...saved,
+  });
+
+  effect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(gameState));
+    } catch {
+      // storage full or blocked; play continues unsaved 
+    }
+  });
+
+  const theWord = () => theWords[gameState.gameId];
+  const currentRow = () => board[gameState.currentRowIndex];
+  const currentGuess = () => currentRow().map((tile) => tile.letter).join('');
+
+  // Best status per letter. Reads letters only on scored tiles, so typing doesn't recompute it.
+  const keyStatuses = computed(() => {
+    const best = {};
+    for (const tile of board.flat()) {
+      const { status } = tile;
+      if (!status) continue;
+      if (STATUS_RANK[status] > (STATUS_RANK[best[tile.letter]] ?? 0)) {
+        best[tile.letter] = status;
+      }
+    }
+    return best;
+  });
+
+  function clearError() {
+    gameState.errors = false;
+    gameState.message = '';
+  }
+
+  function newGame() {
+    gameState.currentRowIndex = 0;
+    gameState.errors = false;
+    gameState.gameId = Math.floor(Math.random() * theWords.length);
+    gameState.guesses = [];
+    gameState.message = '';
+    gameState.numGuesses = parseNumGuesses(host.dataset.guesses);
+    gameState.status = 'IN_PROGRESS';
+    generateBoard();
+  }
+
+  // Build and fill the rows before inserting them, so the board notifies once
+  function generateBoard() {
+    const rows = Array.from({ length: gameState.numGuesses }, () => 
+      Array.from(theWord(), (_, index) => new Tile(index)),
+    );
+
+    gameState.guesses.forEach((guess, i) => {
+      rows[i].forEach((tile, j) => {
+        tile.letter = guess[j];
+      });
+      Tile.updateStatusesForRow(rows[i], theWord());
+    });
+
+    board.splice(0, board.length, ...rows);
+  }
+
+  function onKeyPress({ e }) {
+    if (gameState.status !== 'IN_PROGRESS') return;
+
+    let key = e.key;
+    if (e.type === 'click') {
+      const button = e.target.closest('button');
+      if (!button) return;
+      // Prevent a later physical Enter from clicking the focused key
+      button.blur();
+      key = button.textContent;
+    }
+
+    if (/^[a-z]$/i.test(key)) {
+      currentRow().find((tile) => !tile.letter)?.fill(key);
+    } else if (key === 'Backspace') {
+      if (gameState.errors) {
+        clearError();
+      }
+      currentRow().findLast((tile) => tile.letter)?.empty();
+    } else if (key === 'Enter') {
+      submitGuess();
+    }
+  }
+
+  function submitGuess() {
+    const guess = currentGuess();
+    if (guess.length < theWord().length) return;
+
+    if (!validWords.has(guess)) {
+      gameState.errors = true;
+      gameState.message = 'Not a word.';
+      return;
+    }
+
+    gameState.guesses.push(guess);
+    Tile.updateStatusesForRow(currentRow(), theWord());
+
+    if (guess === theWord()) {
+      gameState.status = 'WIN';
+      gameState.message = 'You win!';
+    } else if (gameState.currentRowIndex >= gameState.numGuesses - 1) {
+      gameState.status = 'LOSE';
+      gameState.message = `Sorry, the word is "${theWord().toUpperCase()}"`;
     } else {
-      console.warn(
-        `Invalid argument passed to game: ${num}. Must be a number between 3–10.`,
-      );
+      gameState.currentRowIndex++;
     }
   }
 
   return {
-    /**
-     * Array of rows of tile objects defining the game board
-     * @type {Array<Array<Tile>>}
-     */
-    board: [],
-    /**
-     * Stores game state and persists in local storage
-     * @type {{status: 'NONE' | 'IN_PROGRESS' | 'WIN' | 'LOSE'}}
-     */
-    gameState: Alpine.$persist({
-      currentRowIndex: 0,
-      errors: false,
-      gameId: 0,
-      guesses: [],
-      message: '',
-      numGuesses: numGuesses,
-      status: 'NONE', 
-    }),
-
-    letters: [
-      'QWERTYUIOP'.split(''),
-      'ASDFGHJKL'.split(''),
-      ['Enter', ...'ZXCVBNM'.split(''), 'Backspace'],
-    ],
-
-    get currentRow() {
-      return this.board[this.gameState.currentRowIndex];
-    },
-
-    get currentGuess() {
-      return this.currentRow.map((tile) => tile.letter).join('');
-    },
-
-    get remainingGuesses() {
-      return this.gameState.numGuesses - this.gameState.currentRowIndex - 1;
-    },
-
-    get canPlayAgain() {
-      return this.gameState.status === 'WIN' || this.gameState.status === 'LOSE';
-    },
-
-    get theWord() {
-      return theWords[this.gameState.gameId];
-    },
-
+    board,
+    letters,
+    newGame,
+    onKeyPress,
     get message() {
-      return this.gameState.message;
-    },
-
-    init() {
-      if (this.gameState.status === 'NONE') {
-        this.newGame();
-      } else {
-        this.restoreGame();
-      }
-    },
-
-    newGame() {
-      this.gameState.message = '';
-      this.gameState.currentRowIndex = 0;
-      this.gameState.gameId = this.generateGameId();
-      this.gameState.guesses = [];
-      this.gameState.status = 'IN_PROGRESS';
-      this.generateBoard();
-    },
-
-    restoreGame() {
-      if (this.gameState.errors === true) {
-        this.gameState.message = '';
-        this.gameState.errors = false;
-      }
-      this.generateBoard();
-    },
-
-    generateBoard() {
-      this.board = Array.from({ length: this.gameState.numGuesses }, () => {
-        return Array.from({ length: this.theWord.length }, (_, index) => {
-          return new Tile(index);
-        });
-      });
-
-      const guesses = this.gameState.guesses;
-
-      // if guesses exist, fill tiles with letters then update status
-      if (guesses.length > 0) {
-        guesses.forEach((guess, index) => {
-          const row = this.board[index];
-          for (let tile = 0; tile < row.length; tile++) {
-            row[tile].letter = guess.charAt(tile);
-          }
-          Tile.updateStatusesForRow(row, this.theWord);
-        });
-      }
-    },
-
-    generateGameId() {
-      return Math.floor(Math.random() * theWords.length);
-    },
-
-    isCorrectWord(guess) {
-      return guess === theWords[this.gameState.gameId];
-    },
-
-    matchingTileForKey(key) {
-      return this.board
-        .flat()
-        .filter((tile) => tile.status)
-        .sort((_, tile) => (tile.status === 'correct' ? 1 : -1))
-        .find((tile) => tile.letter === key.toLowerCase());
-    },
-
-    keyStatus(key) {
-      return this.matchingTileForKey(key) ? this.matchingTileForKey(key).status : null;
-    },
-
-    rowStatus(index) {
-      return {
-        current: this.gameState.currentRowIndex === index,
-        invalid: this.gameState.currentRowIndex === index && this.gameState.errors,
-      };
-    },
-
-    onKeyPress(key) {
-      if (this.gameState.status === 'IN_PROGRESS') {
-        if (/^[A-z]$/.test(key)) {
-          this.fillTile(key);
-        } else if (key === 'Backspace') {
-          if (this.gameState.errors) {
-            this.gameState.message = '';
-            this.gameState.errors = false;
-          }
-          this.emptyTile();
-        } else if (key === 'Enter') {
-          this.submitGuess();
-        }
-      }
-    },
-
-    fillTile(key) {
-      for (const tile of this.currentRow) {
-        if (!tile.letter) {
-          tile.fill(key);
-          break;
-        }
-      }
-    },
-
-    emptyTile() {
-      for (const tile of [...this.currentRow].reverse()) {
-        if (tile.letter) {
-          tile.empty();
-          break;
-        }
-      }
-    },
-
-    submitGuess() {
-      // first check if row is full of letters
-      if (this.currentGuess.length < this.theWord.length) {
+      return gameState.message;
+    }, 
+    canPlayAgain: () => gameState.status === 'WIN' || gameState.status === 'LOSE',
+    keyStatus: ({ render }) => keyStatuses()[render.item.toLowerCase()] ?? null,
+    rowStatus: ({ render }) => ({
+      current: gameState.currentRowIndex === render.index,
+      invalid: gameState.currentRowIndex === render.index && gameState.errors,
+    }),
+    connect() {
+      if (gameState.status === 'NONE') {
+        newGame();
         return;
       }
-
-      if (!allWords.includes(this.currentGuess)) {
-        this.gameState.errors = true;
-        this.gameState.message = 'Not a word.';
-        return;
-      }
-
-      // Confirmed valid word submission at this point
-      // Store guess in gameState guesses array
-      this.gameState.guesses.push(this.currentGuess);
-
-      Tile.updateStatusesForRow(this.currentRow, this.theWord);
-
-      if (this.isCorrectWord(this.currentGuess)) {
-        this.doWin();
-      } else if (this.remainingGuesses <= 0) {
-        this.doLose();
-      } else {
-        this.doNextGuess();
-      }
-    },
-
-    doNextGuess() {
-      this.gameState.currentRowIndex++;
-    },
-
-    doWin() {
-      this.gameState.status = 'WIN';
-      this.gameState.message = 'You win!';
-    },
-
-    doLose() {
-      this.gameState.status = 'LOSE';
-      this.gameState.message = `Sorry, the word is "${this.theWord.toUpperCase()}"`;
+      if (gameState.errors) clearError();
+      generateBoard();
     },
   };
 }

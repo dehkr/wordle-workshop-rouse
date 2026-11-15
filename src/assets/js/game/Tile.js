@@ -1,10 +1,18 @@
+import { signal } from 'rousejs';
+
 export class Tile {
-  letter = '';
-  status = '';
+  #letter = signal('');
+  #status = signal('');
 
   constructor(position) {
     this.position = position;
   }
+
+  get letter() { return this.#letter(); }
+  set letter(value) { this.#letter(value); }
+
+  get status() { return this.#status(); }
+  set status(value) { this.#status(value); }
 
   /**
    * Updates the letter and status of a row
@@ -24,7 +32,7 @@ export class Tile {
 
     // check for present letters
     for (const tile of row) {
-      if (theWord.includes(tile.letter)) {
+      if (!tile.status && theWord.includes(tile.letter)) {
         tile.status = 'present';
         theWord[theWord.indexOf(tile.letter)] = null;
       }
