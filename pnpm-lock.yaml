@@ -17,6 +17,9 @@ importers:
       hono:
         specifier: ^4.10.6
         version: 4.10.6
+      rousejs:
+        specifier: ^0.17.0
+        version: 0.17.0
     devDependencies:
       '@biomejs/biome':
         specifier: 2.3.5
@@ -510,6 +513,9 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
+  rousejs@0.17.0:
+    resolution: {integrity: sha512-AyAkWQy7WDqy/2VLN60ZZWH0eH58oxquOAY4mGmZHdjRbToat5/KVQLlMXs+640Z0isbJ03e5ViV9sCmjygBBw==}
+
   semver@7.7.3:
     resolution: {integrity: sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q==}
     engines: {node: '>=10'}
@@ -931,6 +937,8 @@ snapshots:
   path-to-regexp@6.3.0: {}
 
   pathe@2.0.3: {}
+
+  rousejs@0.17.0: {}
 
   semver@7.7.3: {}
 
